@@ -1,0 +1,250 @@
+---
+title: "mobility data"
+author: "Eric Tran"
+date: "5/13/2020"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(lubridate)
+```
+
+Reading in the datasets:
+```{r}
+#google global mobility report
+google.global <- read.csv("/Users/etran 1/Desktop/college/datafest/googlemobility.csv", header = TRUE)
+google.global <- google.global %>%
+  filter(country_region == "United States") %>%
+  filter(sub_region_1 != "") %>%
+  filter(sub_region_2 == "") %>%
+  select(-c(country_region_code, sub_region_2))
+google.global <- data.frame(lapply(google.global, as.character), stringsAsFactors = FALSE)
+google.global <- google.global %>%
+  mutate(date = as.numeric(as.Date(date))) %>%
+  filter(date > 18321) %>%
+  filter(date != 18372) %>%
+  filter(date < 18361) %>%
+  mutate(date = as_date(date))
+
+#phone tracking mobility report
+USmobility.overall <- read.csv("/Users/etran 1/Desktop/college/datafest/DL-COVID-19-master/DL-us-mobility-daterow.csv", header = TRUE) %>%
+  filter(admin2 == "") %>%
+  select(-c(admin_level, admin2, fips))
+USmobility.overall <- data.frame(lapply(USmobility.overall, as.character), stringsAsFactors = FALSE)
+USmobility.overall <- USmobility.overall %>%
+  mutate(date = as.numeric(as.Date(date))) %>%
+  filter(date < 18390) %>%
+  filter(date < 18361) %>%
+  mutate(date = as_date(date)) %>%
+  filter(admin1 != "") %>%
+  rename(newdate = date) %>%
+  mutate(admin1 = gsub("Washington, D.C.","District of Columbia", admin1))
+```
+
+```{r}
+newcase <- function(cases) {
+  size <- length(cases)
+  new <- cases
+  for (i in 2:size) {
+    if ((cases[i] - cases[i-1]) >= 0) {
+    new[i] <- cases[i] - cases[i-1]
+    }
+    else {
+      new[i] = 0
+    }
+  }
+  
+  return(new)
+}
+```
+
+```{r}
+weather <- read.csv("/Users/etran 1/Desktop/college/datafest/weath.csv", header = TRUE)
+pop <- read.csv("/Users/etran 1/Desktop/college/datafest/popo.csv", header = TRUE)
+pop <- pop %>% 
+  mutate(Province_State = str_replace(State, ".", "")) 
+us <- weather %>% 
+  filter(Country_Region == 'US') %>% 
+  mutate(newcases = newcase(ConfirmedCases))
+
+merged <- merge(us, pop, by = "Province_State")
+
+merged <- merged %>% 
+  mutate(prop = as.numeric(ConfirmedCases)/as.numeric(trimws(gsub(",", "", as.character(pop[1,2])))),
+         newprop = newcases/as.numeric(trimws(gsub(",", "", as.character(pop[1,2]))))) %>% 
+  select(-c(stp, slp, dewp, rh, ah, day_from_jan_first, country.province, Id))
+
+winds <- merged %>% 
+  group_by(Province_State) %>% 
+  filter(wdsp < 100) %>% 
+  summarise(avgwdsp = mean(wdsp))
+  
+last <- merged %>% 
+  filter(as.character(Date) == "2020-04-08")
+
+windy <- merge(winds, last, by = "Province_State")
+```
+
+```{r}
+#merged weather and population data
+casey.merge <- merged %>%
+  filter(Province_State != "Puerto Rico")
+casey.merge <- data.frame(lapply(casey.merge, as.character), stringsAsFactors = FALSE)
+casey.merge <- casey.merge %>%
+  mutate(Date = as.numeric(as.Date(Date))) %>%
+  filter(Date > 18321) %>%
+  mutate(Date = as_date(Date))
+
+casey.merge <- casey.merge[order(casey.merge$Date),]
+casey.merge <- casey.merge[order(casey.merge$Province_State),]
+```
+
+```{r}
+#merged tracking data
+tracking <- cbind(google.global, USmobility.overall) %>%
+  select(-c(newdate, country_code, admin1))
+```
+
+```{r}
+#merging all data into one dataset
+my.data <- cbind(tracking, casey.merge) %>%
+  select(-c(samples, Province_State, Country_Region, Date, Lat, Long, State, Census, Estimates.Base, X2010, X2011, X2012, X2013, X2014, X2015, X2016, X2017, X2018)) %>%
+  rename(
+    country = country_region,
+    state = sub_region_1,
+    mobility = m50,
+    mobility_index = m50_index,
+    cases = ConfirmedCases,
+    deaths = Fatalities,
+    mintemp = min,
+    maxtemp = max,
+    population = X2019,
+    retail.recreation.change = retail_and_recreation_percent_change_from_baseline,
+    grocery.pharmacy.change = grocery_and_pharmacy_percent_change_from_baseline,
+    parks.change = parks_percent_change_from_baseline,
+    transit.change = transit_stations_percent_change_from_baseline,
+    workplace.change = workplaces_percent_change_from_baseline,
+    residential.change = residential_percent_change_from_baseline
+  ) %>%
+  mutate(cases = as.numeric(cases)) %>%
+  mutate(deaths = as.numeric(deaths)) %>%
+  mutate(mobility_index = as.numeric(mobility_index)) %>%
+  mutate(retail.recreation.change = as.numeric(retail.recreation.change)) %>%
+  mutate(grocery.pharmacy.change = as.numeric(grocery.pharmacy.change)) %>%
+  mutate(parks.change = as.numeric(parks.change)) %>%
+  mutate(transit.change = as.numeric(transit.change)) %>%
+  mutate(workplace.change = as.numeric(workplace.change)) %>%
+  mutate(residential.change = as.numeric(residential.change)) %>%
+  mutate(mobility = as.numeric(mobility)) %>%
+  mutate(temp = as.numeric(temp)) %>%
+  mutate(mintemp = as.numeric(mintemp)) %>%
+  mutate(maxtemp = as.numeric(maxtemp)) %>%
+  mutate(wdsp = as.numeric(wdsp)) %>%
+  mutate(prcp = as.numeric(prcp)) %>%
+  mutate(fog = as.numeric(fog)) %>%
+  mutate(newcases = as.numeric(newcases)) %>%
+  mutate(prop = as.numeric(prop)) %>%
+  mutate(newprop = as.numeric(newprop)) %>%
+  mutate(population = as.numeric(gsub(",","",population)))
+
+write.csv(my.data, "/Users/etran 1/Desktop/college/datafest/datafest_data.csv")
+```
+
+```{r}
+my.data %>% 
+  group_by(state) %>% 
+  ggplot() +
+  geom_point(mapping = aes(mobility_index, deaths, color = state))
+```
+
+```{r}
+my.data %>%
+  filter(state == "California") %>%
+  ggplot() +
+  geom_point(mapping = aes(date, cases, color = mobility_index)) +
+  scale_color_gradient(low = "green", high = "red") +
+  ggtitle("COVID-19 Cases in CA with Regards to Mobility Index Score") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"))
+```
+
+```{r}
+my.data %>%
+  filter(state == "California") %>%
+  ggplot(aes(x = date, y = newcases, color = mobility_index)) +
+  geom_point() +
+  scale_color_gradient(low = "green", high = "red") +
+  ggtitle("COVID-19 Cases in CA with Regards to Mobility Index Score") +
+  geom_smooth(se = FALSE, method = "loess", formula = y ~ x) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"))
+```
+
+```{r}
+my.data %>%
+  filter(state == "California") %>%
+  ggplot(aes(x = date, y = newcases, color = mobility_index)) +
+  geom_point() +
+  scale_color_gradient(low = "green", high = "red") +
+  ggtitle("New Daily COVID-19 Cases in CA with Regards to Mobility Index Score") +
+  geom_smooth(se = FALSE, method = "loess", formula = y ~ x) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  xlab("Dates from March 1 to April 8") + ylab("New Cases")
+```
+
+```{r}
+my.data %>%
+  filter(state == "California") %>%
+  ggplot(aes(x = date)) +
+  geom_line(aes(y=workplace.change, color = "Workplace")) +
+  geom_line(aes(y = residential.change, color = "Residential")) +
+  geom_line(aes(y=retail.recreation.change, color = "Retail and Rereation")) +
+  geom_line(aes(y=grocery.pharmacy.change, color = "Grocery/Pharmacy")) +
+  geom_line(aes(y=parks.change, color = "Parks")) +
+  geom_line(aes(y=transit.change, color = "Transit")) +
+  ggtitle("Changes in CA Population Movement with Regard to Specific Causes") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  xlab("Dates from March 1 to April 8") + ylab("Percent Change in Movement")
+```
+
+```{r}
+my.data %>%
+  ggplot(aes(x = date, y = mobility_index, color = log(population))) +
+  geom_point() +
+  geom_smooth(se = FALSE, method = "loess", formula = y ~ x) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  xlab("Dates from March 1 to April 8") + ylab("Mobility Index Score") +
+  ggtitle("Changes in State Movements with Regard to Population Size")
+```
+
+```{r}
+#Scatterplots relating each condition to cumulative confirmed cases count
+windy %>% 
+  group_by(Province_State) %>% 
+  ggplot() +
+  geom_point(mapping = aes(avgwdsp, prop, color = Province_State)) +
+  xlab("Confirmed Cases as a Ratio of Total Population") +
+  ylab("Average Windspeed") +
+  ggtitle("Cumulative Confirmed Cases Relative to Total Population by Average Windspeed")
+```
+
+```{r}
+rainy %>% 
+  group_by(Province_State) %>% 
+  ggplot() +
+  geom_point(mapping = aes(avgprcp, prop, color = Province_State)) +
+  xlab("Confirmed Cases as a Ratio of Total Population") +
+  ylab("Average Precipitation") +
+  ggtitle("Cumulative Confirmed Cases Relative to Total Population by Average Precipitation")
+```
+
+```{r}
+#Scatterplot relating daily temperature to daily new cases as a ratio of total population
+merged %>% 
+  filter(newcases>0) %>% 
+  ggplot() +
+  geom_point(mapping = aes(newprop, temp, color = Province_State)) +
+  xlab("New Cases Relative as a Ratio of Population") +
+  ylab("Average Daily Temperature") +
+  ggtitle("Daily New Cases Relative to Total Population by Daily Temperature")
+```
+
